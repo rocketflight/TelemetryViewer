@@ -1,4 +1,3 @@
-import java.awt.GridLayout;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.util.function.Consumer;
@@ -7,7 +6,6 @@ import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JTextField;
 
-@SuppressWarnings("serial")
 public class WidgetFrequencyDomainType extends Widget {
 	
 	JComboBox<String> typeCombobox;
@@ -73,15 +71,14 @@ public class WidgetFrequencyDomainType extends Widget {
 		this.totalSampleCountHandler = totalSampleCountEventHandler;
 		this.rowCountHandler = rowCountEventHandler;
 		
-		setLayout(new GridLayout(4, 2, 10, 10));
-		add(new JLabel("Type: "));
-		add(typeCombobox);
-		add(sampleCountLabel);
-		add(sampleCountTextfield);
-		add(totalSampleCountLabel);
-		add(totalSampleCountTextfield);
-		add(rowCountLabel);
-		add(rowCountTextfield);
+		widgets.put(new JLabel("Type: "), "");
+		widgets.put(typeCombobox, "span 3, growx");
+		widgets.put(sampleCountLabel, "");
+		widgets.put(sampleCountTextfield, "span 3, growx");
+		widgets.put(totalSampleCountLabel, "");
+		widgets.put(totalSampleCountTextfield, "span 3, growx");
+		widgets.put(rowCountLabel, "");
+		widgets.put(rowCountTextfield, "span 3, growx");
 		
 		sampleCountTextfield.addFocusListener(new FocusListener() {
 			@Override public void focusLost(FocusEvent fe)   { sanityCheck(); }
@@ -231,7 +228,7 @@ public class WidgetFrequencyDomainType extends Widget {
 	 * 
 	 * @param lines    A queue of remaining lines from the layout file.
 	 */
-	@Override public void importState(Controller.QueueOfLines lines) {
+	@Override public void importState(CommunicationController.QueueOfLines lines) {
 
 		// parse the text
 		int sampleCount      = ChartUtils.parseInteger(lines.remove(), "sample count = %d");

@@ -1,4 +1,3 @@
-import java.awt.GridLayout;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.util.function.Consumer;
@@ -6,7 +5,6 @@ import java.util.function.Consumer;
 import javax.swing.JLabel;
 import javax.swing.JTextField;
 
-@SuppressWarnings("serial")
 public class WidgetTextfieldInteger extends Widget {
 	
 	String label;
@@ -35,16 +33,14 @@ public class WidgetTextfieldInteger extends Widget {
 		this.lowerLimit = lowerLimit;
 		this.upperLimit = upperLimit;
 		
-		setLayout(new GridLayout(1, 2, 10, 10));
-		add(new JLabel(label + ": "));
-		
 		textfield = new JTextField(Integer.toString(defaultValue));
 		textfield.addFocusListener(new FocusListener() {
 			@Override public void focusLost(FocusEvent fe)   { sanityCheck(); }
 			@Override public void focusGained(FocusEvent fe) { textfield.selectAll(); }
 		});
 		
-		add(textfield);
+		widgets.put(new JLabel(label + ": "), "");
+		widgets.put(textfield, "span 3, growx");
 
 		sanityCheck();
 		
@@ -80,7 +76,7 @@ public class WidgetTextfieldInteger extends Widget {
 	 * 
 	 * @param lines    A queue of remaining lines from the layout file.
 	 */
-	@Override public void importState(Controller.QueueOfLines lines) {
+	@Override public void importState(CommunicationController.QueueOfLines lines) {
 
 		// parse the text
 		int number = ChartUtils.parseInteger(lines.remove(), label.trim().toLowerCase() + " = %d");

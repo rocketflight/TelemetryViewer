@@ -4,20 +4,20 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
+import com.jogamp.common.nio.Buffers;
 
 public class DatasetsController {
 
 	private static Map<Integer, Dataset> datasets = new TreeMap<Integer, Dataset>();
 	private static AtomicInteger sampleCount = new AtomicInteger(0);
-	private static List<Consumer<Boolean>> sampleCountListeners = new ArrayList<Consumer<Boolean>>(); // true = (sampleCount >= 1)
 	
 	public static final int SLOT_SIZE = 1048576; // 1M values
 	public static final int SLOT_COUNT = Integer.MAX_VALUE / SLOT_SIZE + 1; // +1 to round up
@@ -100,28 +100,6 @@ public class DatasetsController {
 	private static int maximumSampleNumberExporting = -1;
 	
 	/**
-	 * Registers a listener that will be notified when the sample count is set to 1 or 0, and triggers an event to ensure the GUI is in sync.
-	 * 
-	 * @param listener    The listener to be notified.
-	 */
-	public static void addSampleCountListener(Consumer<Boolean> listener) {
-		
-		sampleCountListeners.add(listener);
-		notifySampleCountListeners();
-		
-	}
-	
-	/**
-	 * Notifies all registered listeners about the sample count.
-	 */
-	private static void notifySampleCountListeners() {
-		
-		for(Consumer<Boolean> listener : sampleCountListeners)
-			listener.accept(sampleCount.get() >= 1);
-		
-	}
-	
-	/**
 	 * @return    The number of fields in the data structure.
 	 */
 	public static int getDatasetsCount() {
@@ -174,11 +152,12 @@ public class DatasetsController {
 	 */
 	public static boolean removeDataset(int location) {
 		
-		PositionedChart[] charts = Controller.getCharts().toArray(new PositionedChart[0]);
+		PositionedChart[] charts = ChartsController.getCharts().toArray(new PositionedChart[0]);
 		for(PositionedChart chart : charts)
-			for(Dataset dataset : chart.datasets)
-				if(dataset.location == location)
-					Controller.removeChart(chart);
+			if(chart.datasets != null)
+				for(Dataset dataset : chart.datasets)
+					if(dataset.location == location)
+						ChartsController.removeChart(chart);
 		
 		Dataset removedDataset = datasets.remove(location);
 		if(removedDataset != null)
@@ -195,7 +174,8 @@ public class DatasetsController {
 			sampleCount.set(0);
 			firstTimestamp = 0;
 			
-			notifySampleCountListeners();
+			CommunicationView.instance.allowExporting(false);
+			OpenGLChartsView.instance.switchToLiveView();
 		}
 		
 		if(removedDataset == null)
@@ -206,11 +186,11 @@ public class DatasetsController {
 	}
 	
 	/**
-	 * Removes all charts and Datasets.
+	 * Removes all charts, Datasets and Cameras.
 	 */
 	public static void removeAllDatasets() {
 		
-		Controller.removeAllCharts();
+		ChartsController.removeAllCharts();
 		
 		for(Dataset dataset : getAllDatasets())
 			for(Dataset.Slot slot : dataset.slots)
@@ -226,12 +206,17 @@ public class DatasetsController {
 		sampleCount.set(0);
 		firstTimestamp = 0;
 		
-		notifySampleCountListeners();
+		for(Camera camera : cameras.keySet())
+			camera.dispose();
+		cameras.clear();
+		
+		CommunicationView.instance.allowExporting(false);
+		OpenGLChartsView.instance.switchToLiveView();
 		
 	}
 	
 	/**
-	 * Removes all samples and timestamps, but does not remove the Dataset or Chart objects.
+	 * Removes all samples, timestamps and camera images, but does not remove the Dataset, Chart or Camera objects.
 	 */
 	public static void removeAllData() {
 		
@@ -248,7 +233,11 @@ public class DatasetsController {
 		sampleCount.set(0);
 		firstTimestamp = 0;
 		
-		notifySampleCountListeners();
+		for(Camera camera : cameras.keySet())
+			camera.dispose();
+		
+		CommunicationView.instance.allowExporting(false);
+		OpenGLChartsView.instance.switchToLiveView();
 		
 	}
 	
@@ -278,7 +267,8 @@ public class DatasetsController {
 		int newSampleCount = sampleCount.incrementAndGet();
 		if(newSampleCount == 1) {
 			firstTimestamp = timestamps[0].getValue(0);
-			notifySampleCountListeners();
+			if(!CommunicationController.getPort().equals(CommunicationController.PORT_FILE))
+				CommunicationView.instance.allowExporting(true);
 		}
 		
 	}
@@ -300,8 +290,77 @@ public class DatasetsController {
 		int newSampleCount = sampleCount.incrementAndGet();
 		if(newSampleCount == 1) {
 			firstTimestamp = timestamps[0].getValue(0);
-			notifySampleCountListeners();
+			if(!CommunicationController.getPort().equals(CommunicationController.PORT_FILE))
+				CommunicationView.instance.allowExporting(true);
 		}
+		
+	}
+	
+	private static Map<Camera, Boolean> cameras = new HashMap<Camera, Boolean>(); // the Boolean is true if the camera is currently owned by a chart
+	
+	/**
+	 * Obtains ownership of a camera, preventing other charts from using it.
+	 * 
+	 * @param name       The camera name or URL.
+	 * @param isMjpeg    True if using MJPEG-over-HTTP.
+	 * @return           The camera object, or null if the camera is already owned or does not exist.
+	 */
+	public static Camera acquireCamera(String name, boolean isMjpeg) {
+		
+		// check if the camera is already known
+		for(Map.Entry<Camera, Boolean> entry : cameras.entrySet())
+			if(entry.getKey().name.equals(name))
+				if(entry.getValue() == false) {
+					entry.setValue(true);
+					return entry.getKey(); // the camera was previously owned but is currently available
+				} else {
+					return null; // the camera is currently owned by another chart
+				}
+		
+		// the camera is not already known
+		Camera c = new Camera(name, isMjpeg);
+		cameras.put(c, true);
+		return c; // the camera has been acquired
+		
+	}
+	
+	/**
+	 * Releases ownership of a camera, allowing another chart to acquire it.
+	 * 
+	 * @param c    The camera.
+	 */
+	public static void releaseCamera(Camera c) {
+		
+		c.disconnect();
+		if(c.getFrameCount() == 0) {
+			c.dispose();
+			cameras.remove(c);
+		}
+		
+		for(Map.Entry<Camera, Boolean> entry : cameras.entrySet())
+			if(entry.getKey() == c)
+				entry.setValue(false);
+		
+	}
+	
+	/**
+	 * Removes a Camera from the Map of acquired camera.
+	 * This method should be called when
+	 * 
+	 * @param c    The camera.
+	 */
+	public static void removeCamera(Camera c) {
+		
+		cameras.remove(c);
+		
+	}
+	
+	/**
+	 * @return    A List of the cameras that are/were used.
+	 */
+	public static Set<Camera> getExistingCameras() {
+		
+		return cameras.keySet();
 		
 	}
 	
@@ -322,9 +381,27 @@ public class DatasetsController {
 	 */
 	public static long getTimestamp(int sampleNumber) {
 		
+		if(sampleNumber < 0)
+			return 0;
+		
 		int slotNumber = sampleNumber / SLOT_SIZE;
 		int slotIndex  = sampleNumber % SLOT_SIZE;
 		return timestamps[slotNumber].getValue(slotIndex);
+		
+	}
+	
+	public static FloatBuffer getTimestampsBuffer(int firstSampleNumber, int lastSampleNumber, long plotMinX) {
+		
+		FloatBuffer buffer = Buffers.newDirectFloatBuffer(lastSampleNumber - firstSampleNumber + 1);
+		
+		if(firstSampleNumber < 0)
+			return buffer;
+		
+		for(int i = firstSampleNumber; i <= lastSampleNumber; i++)
+			buffer.put((float) (getTimestamp(i) - plotMinX));
+		
+		buffer.rewind();
+		return buffer;
 		
 	}
 	

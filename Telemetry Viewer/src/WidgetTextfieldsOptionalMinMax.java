@@ -1,4 +1,3 @@
-import java.awt.GridLayout;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.util.function.BiConsumer;
@@ -10,7 +9,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 
-@SuppressWarnings("serial")
 public class WidgetTextfieldsOptionalMinMax extends Widget {
 	
 	String prefix;
@@ -69,26 +67,24 @@ public class WidgetTextfieldsOptionalMinMax extends Widget {
 		minCheckbox = new JCheckBox("Automatic");
 		minCheckbox.setSelected(true);
 		minCheckbox.addActionListener(event -> sanityCheck());
-
-		setLayout(new GridLayout(2, 2, 10, 10));
 		
 		JPanel maxPanel = new JPanel();
 		maxPanel.setLayout(new BoxLayout(maxPanel, BoxLayout.X_AXIS));
 		maxPanel.add(maxCheckbox);
-		maxPanel.add(Box.createHorizontalStrut(10));
+		maxPanel.add(Box.createHorizontalStrut(Theme.padding));
 		maxPanel.add(maxTextfield);
 		
-		add(new JLabel(labelPrefix + " Maximum: "));
-		add(maxPanel);
+		widgets.put(new JLabel(labelPrefix + " Maximum: "), "");
+		widgets.put(maxPanel, "span 3, growx");
 		
 		JPanel minPanel = new JPanel();
 		minPanel.setLayout(new BoxLayout(minPanel, BoxLayout.X_AXIS));
 		minPanel.add(minCheckbox);
-		minPanel.add(Box.createHorizontalStrut(10));
+		minPanel.add(Box.createHorizontalStrut(Theme.padding));
 		minPanel.add(minTextfield);
 		
-		add(new JLabel(labelPrefix + " Minimum: "));
-		add(minPanel);
+		widgets.put(new JLabel(labelPrefix + " Minimum: "), "");
+		widgets.put(minPanel, "span 3, growx");
 		
 		sanityCheck();
 		
@@ -153,7 +149,7 @@ public class WidgetTextfieldsOptionalMinMax extends Widget {
 	 * 
 	 * @param lines    A queue of remaining lines from the layout file.
 	 */
-	@Override public void importState(Controller.QueueOfLines lines) {
+	@Override public void importState(CommunicationController.QueueOfLines lines) {
 
 		// parse the text
 		boolean autoscaleMin = ChartUtils.parseBoolean(lines.remove(), "autoscale " + prefix.trim().toLowerCase() + " minimum = %b");

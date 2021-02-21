@@ -1,6 +1,6 @@
 import java.util.ArrayList;
 import java.util.List;
-import com.jogamp.opengl.GL2;
+import com.jogamp.opengl.GL2ES3;
 
 public abstract class PositionedChart {
 	
@@ -11,7 +11,9 @@ public abstract class PositionedChart {
 	int bottomRightY;
 	
 	int sampleCount;
-	Dataset[] datasets;
+	List<Dataset> datasets;
+	List<Dataset.Bitfield.State> bitfieldEdges;
+	List<Dataset.Bitfield.State> bitfieldLevels;
 	Widget[] widgets;
 	
 	public PositionedChart(int x1, int y1, int x2, int y2) {
@@ -45,9 +47,9 @@ public abstract class PositionedChart {
 		
 	}
 	
-	public abstract void drawChart(GL2 gl, int width, int height, int lastSampleNumber, double zoomLevel, int mouseX, int mouseY);
+	public abstract EventHandler drawChart(GL2ES3 gl, float[] chartMatrix, int width, int height, int lastSampleNumber, double zoomLevel, int mouseX, int mouseY);
 	
-	public final void importChart(Controller.QueueOfLines lines) {
+	public final void importChart(CommunicationController.QueueOfLines lines) {
 
 		for(Widget widget : widgets)
 			if(widget != null)
@@ -55,7 +57,7 @@ public abstract class PositionedChart {
 		
 	}
 	
-	public final List<String> exportChart() {
+	final public List<String> exportChart() {
 		
 		List<String> lines = new ArrayList<String>();
 		
@@ -69,5 +71,35 @@ public abstract class PositionedChart {
 	}
 	
 	public abstract String toString();
+	
+	/**
+	 * Schedules the chart to be disposed.
+	 * Non-GPU resources (cache files, etc.) will be released immediately.
+	 * GPU resources will be released the next time the OpenGLChartsRegion is drawn. (the next vsync, if it's on screen.)
+	 */
+	final public void dispose() {
+		
+		disposeNonGpu();
+		OpenGLChartsView.instance.chartsToDispose.add(this);
+		
+	}
+	
+	/**
+	 * Charts that create cache files or other non-GPU resources must dispose of them when this method is called.
+	 * The chart may be drawn after this call, so the chart must be able to automatically regenerate any needed caches.
+	 */
+	public void disposeNonGpu() {
+		
+	}
+	
+	/**
+	 * Charts that create any OpenGL FBOs/textures/etc. must dispose of them when this method is called.
+	 * The chart may be drawn after this call, so the chart must be able to automatically regenerate any needed FBOs/textures/etc.
+	 * 
+	 * @param gl    The OpenGL context.
+	 */
+	public void disposeGpu(GL2ES3 gl) {
+		
+	}
 	
 }

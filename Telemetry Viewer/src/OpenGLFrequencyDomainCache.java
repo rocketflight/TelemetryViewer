@@ -1,7 +1,11 @@
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.jogamp.common.nio.Buffers;
-import com.jogamp.opengl.GL2;
+import com.jogamp.opengl.GL2ES3;
+import com.jogamp.opengl.GL3;
 
 /**
  * A class that performs DFTs, caches them, and renders them on screen.
@@ -14,7 +18,7 @@ public class OpenGLFrequencyDomainCache {
 	int[][] firstSampleNumberOfDft; // [datasetN][dftN]
 	int previousDftWindowLength;
 	int previousTotalSampleCount;
-	Dataset[] previousDatasets;
+	List<Dataset> previousDatasets;
 	String previousChartType;
 	
 	float minHz;
@@ -31,21 +35,23 @@ public class OpenGLFrequencyDomainCache {
 	FloatBuffer waterfallPixels;
 	FloatBuffer waveformPixels;
 	
-	int[] fbHandle;
-	int[] texHandle;
+	int[] liveViewFbHandle;
+	int[] liveViewTexHandle;
+	int[] waveformViewTexHandle;
+	int[] waterfallViewTexHandle;
 	
 	/**
 	 * Creates an off-screen framebuffer and an empty cache.
 	 * 
 	 * @param gl    The OpenGL context.
 	 */
-	public OpenGLFrequencyDomainCache(GL2 gl) {
+	public OpenGLFrequencyDomainCache(GL2ES3 gl) {
 		
 		dfts = new float[0][][];
 		firstSampleNumberOfDft = new int[0][];
 		previousDftWindowLength = 0;
 		previousTotalSampleCount = 0;
-		previousDatasets = new Dataset[0];
+		previousDatasets = new ArrayList<Dataset>();
 		
 		minHz = 0;
 		maxHz = 0;
@@ -54,28 +60,6 @@ public class OpenGLFrequencyDomainCache {
 		
 		firstDft = 0;
 		lastDft = 0;
-		
-		// create and use a framebuffer
-		fbHandle = new int[1];
-		gl.glGenFramebuffers(1, fbHandle, 0);
-		gl.glBindFramebuffer(GL2.GL_FRAMEBUFFER, fbHandle[0]);
-		
-		// create and use a texture
-		texHandle = new int[1];
-		gl.glGenTextures(1, texHandle, 0);
-		gl.glBindTexture(GL2.GL_TEXTURE_2D, texHandle[0]);
-		gl.glTexImage2D(GL2.GL_TEXTURE_2D, 0, GL2.GL_RGBA, 512, 512, 0, GL2.GL_RGBA, GL2.GL_UNSIGNED_BYTE, null); // dummy 512x512 texture
-		gl.glTexParameteri(GL2.GL_TEXTURE_2D, GL2.GL_TEXTURE_MIN_FILTER, GL2.GL_NEAREST);
-		gl.glTexParameteri(GL2.GL_TEXTURE_2D, GL2.GL_TEXTURE_MAG_FILTER, GL2.GL_NEAREST);
-		gl.glFramebufferTexture2D(GL2.GL_FRAMEBUFFER, GL2.GL_COLOR_ATTACHMENT0, GL2.GL_TEXTURE_2D, texHandle[0], 0);
-		gl.glDrawBuffers(1, new int[] {GL2.GL_COLOR_ATTACHMENT0}, 0);
-		
-		// check for errors
-		if(gl.glCheckFramebufferStatus(GL2.GL_FRAMEBUFFER) != GL2.GL_FRAMEBUFFER_COMPLETE)
-			NotificationsController.showFailureForSeconds("Error while creating the frequency domain cache's framebuffer or texture.", 10, false);
-		
-		// switch back to the screen framebuffer
-		gl.glBindFramebuffer(GL2.GL_FRAMEBUFFER, 0);
 		
 	}
 	
@@ -90,13 +74,13 @@ public class OpenGLFrequencyDomainCache {
 	 * @param datasets            The datasets to visualize.
 	 * @param chartType           "Live View" or "Waveform View" or "Waterfall View"
 	 */
-	public void calculateDfts(int lastSampleNumber, int dftWindowLength, int totalSampleCount, Dataset[] datasets, String chartType) {
+	public void calculateDfts(int lastSampleNumber, int dftWindowLength, int totalSampleCount, List<Dataset> datasets, String chartType) {
 		
-		int datasetsCount = datasets.length;
+		int datasetsCount = datasets.size();
 		int dftsCount = totalSampleCount / dftWindowLength;
 		
 		// flush the cache if the DFT window length has changed, or the datasets have changed, or the chart type has changed
-		if(previousDftWindowLength != dftWindowLength || previousDatasets != datasets || previousTotalSampleCount != totalSampleCount || !previousChartType.equals(chartType)) {
+		if(previousDftWindowLength != dftWindowLength || !previousDatasets.equals(datasets) || previousTotalSampleCount != totalSampleCount || !previousChartType.equals(chartType)) {
 			
 			dfts = new float[datasetsCount][dftsCount][];
 			firstSampleNumberOfDft = new int[datasetsCount][dftsCount];
@@ -125,8 +109,8 @@ public class OpenGLFrequencyDomainCache {
 			int endX = lastSampleNumber;
 			int startX = endX - dftWindowLength + 1;
 			
-			for(int dataset = 0; dataset < datasets.length; dataset++) {
-				float[] samples = datasets[dataset].getSamplesArray(startX, endX);
+			for(int dataset = 0; dataset < datasetsCount; dataset++) {
+				float[] samples = datasets.get(dataset).getSamplesArray(startX, endX);
 				dfts[dataset][0] = calculateDFTxy(samples, CommunicationController.getSampleRate());
 			}
 			
@@ -139,7 +123,7 @@ public class OpenGLFrequencyDomainCache {
 			// calculate the DFT range
 			minPower = dfts[0][0][1];
 			maxPower = dfts[0][0][1];
-			for(int dataset = 0; dataset < datasets.length; dataset++) {
+			for(int dataset = 0; dataset < datasetsCount; dataset++) {
 				for(int i = 1; i < dfts[dataset][0].length; i += 2) {
 					float y = dfts[dataset][0][i];
 					if(y > maxPower) maxPower = y;
@@ -149,7 +133,7 @@ public class OpenGLFrequencyDomainCache {
 			
 		} else {
 			
-			for(int dataset = 0; dataset < datasets.length; dataset++) {
+			for(int dataset = 0; dataset < datasetsCount; dataset++) {
 				for(int dft = firstDft; dft <= lastDft; dft++) {
 					
 					int firstSampleNumber = dft * dftWindowLength;
@@ -159,7 +143,7 @@ public class OpenGLFrequencyDomainCache {
 						
 						int startX = firstSampleNumber;
 						int endX = startX + dftWindowLength - 1;
-						float[] samples = datasets[dataset].getSamplesArray(startX, endX);
+						float[] samples = datasets.get(dataset).getSamplesArray(startX, endX);
 						dfts[dataset][rbIndex] = calculateDFT(samples, CommunicationController.getSampleRate());
 						firstSampleNumberOfDft[dataset][rbIndex] = startX;
 						
@@ -177,7 +161,7 @@ public class OpenGLFrequencyDomainCache {
 			// calculate the DFT range
 			minPower = dfts[0][firstDft % dftsCount][0];
 			maxPower = dfts[0][firstDft % dftsCount][0];
-			for(int dataset = 0; dataset < datasets.length; dataset++) {
+			for(int dataset = 0; dataset < datasetsCount; dataset++) {
 				for(int dft = firstDft; dft <= lastDft; dft++) {
 					for(int i = 0; i < dfts[dataset][dft % dftsCount].length; i++) {
 						float y = dfts[dataset][dft % dftsCount][i];
@@ -314,6 +298,7 @@ public class OpenGLFrequencyDomainCache {
 	 * Draws a Live View on screen. "Live View" is a line chart of a single DFT.
 	 * The x-axis is frequency, the y-axis is power.
 	 * 
+	 * @param chartMatrix    The current 4x4 matrix.
 	 * @param bottomLeftX    Lower-left coordinate of the region to draw in.
 	 * @param bottomLeftY    Lower-left coordinate of the region to draw in.
 	 * @param width          Width of region to draw in.
@@ -323,107 +308,39 @@ public class OpenGLFrequencyDomainCache {
 	 * @param gl             The OpenGL context.
 	 * @param datasets       The datasets to visualize.
 	 */
-	public void renderLiveView(int bottomLeftX, int bottomLeftY, int width, int height, float minPower, float maxPower, GL2 gl, Dataset[] datasets) {
+	public void renderLiveView(float[] chartMatrix, int bottomLeftX, int bottomLeftY, int width, int height, float minPower, float maxPower, GL2ES3 gl, List<Dataset> datasets) {
 		
-		// save the viewport/scissor/point settings, modelview matrix, and projection matrix
-		gl.glPushAttrib(GL2.GL_VIEWPORT_BIT | GL2.GL_SCISSOR_BIT | GL2.GL_POINT_BIT);
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glPushMatrix();
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glPushMatrix();
-
-		// switch to the off-screen framebuffer and corresponding texture
-		gl.glBindFramebuffer(GL2.GL_FRAMEBUFFER, fbHandle[0]);
-		gl.glBindTexture(GL2.GL_TEXTURE_2D, texHandle[0]);
-
-		// replace the existing texture
-		gl.glTexImage2D(GL2.GL_TEXTURE_2D, 0, GL2.GL_RGBA, width, height, 0, GL2.GL_RGBA, GL2.GL_UNSIGNED_BYTE, null);
-
-		// set the viewport and disable the scissor test
-		gl.glViewport(0, 0, width, height);
-		gl.glDisable(GL2.GL_SCISSOR_TEST);
+		float[] offscreenMatrix = new float[16];
+		OpenGL.makeOrthoMatrix(offscreenMatrix, 0, width, 0, height, -1, 1);
+		// adjust so: x = (x - plotMinX) / domain * plotWidth;
+		// adjust so: y = (y - plotMinY) / plotRange * plotHeight;
+		OpenGL.scaleMatrix    (offscreenMatrix, width,              height,                   1);
+		OpenGL.scaleMatrix    (offscreenMatrix, 1f/(maxHz - minHz), 1f/(maxPower - minPower), 1);
+		OpenGL.translateMatrix(offscreenMatrix, -minHz,             -minPower,                0);
 		
-		// set the projection matrix
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glLoadIdentity();
-		gl.glOrtho(0, width, 0, height, -1, 1);
-		
-		// set the modelview matrix
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glLoadIdentity();
-		
-		// set the blend function
-		gl.glBlendFuncSeparate(GL2.GL_SRC_ALPHA, GL2.GL_ONE_MINUS_SRC_ALPHA, GL2.GL_ONE, GL2.GL_ONE_MINUS_SRC_ALPHA);
-		
-		// clear the texture and set the modelview matrix
-		gl.glClearColor(0, 0, 0, 0);
-		gl.glClear(GL2.GL_COLOR_BUFFER_BIT);
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glPushMatrix();
-		
-		// adjust so: x = (x - plotMinX) / domain * plotWidth + xPlotLeft;
-		gl.glTranslatef(0, 0, 0);
-		gl.glScalef(width, 1, 1);
-		gl.glScalef(1.0f / (maxHz - minHz), 1, 1);
-		gl.glTranslatef(-minHz, 0, 0);
-		
-		// adjust so y = (y - plotMinY) / plotRange * plotHeight + yPlotBottom;
-		gl.glTranslatef(0, 0, 0);
-		gl.glScalef(1, height, 1);
-		gl.glScalef(1, 1.0f / (maxPower - minPower), 1);
-		gl.glTranslatef(0, -minPower, 0);
+		if(liveViewFbHandle == null || liveViewTexHandle == null) {
+			liveViewFbHandle = new int[1];
+			liveViewTexHandle = new int[1];
+			OpenGL.createOffscreenFramebuffer(gl, liveViewFbHandle, liveViewTexHandle);
+		}
+		OpenGL.startDrawingOffscreen(gl, offscreenMatrix, liveViewFbHandle, liveViewTexHandle, width, height);
 		
 		// draw the DFT line charts onto the texture
-		for(int dataset = 0; dataset < datasets.length; dataset++) {
+		for(int dataset = 0; dataset < datasets.size(); dataset++) {
 			
 			int dftBinCount = dfts[dataset][0].length / 2;
-			
-			gl.glColor4f(datasets[dataset].color.getRed()/255.0f, datasets[dataset].color.getGreen()/255.0f, datasets[dataset].color.getBlue()/255.0f, 1);
-			gl.glVertexPointer(2, GL2.GL_FLOAT, 0, Buffers.newDirectFloatBuffer(dfts[dataset][0]));
-			gl.glDrawArrays(GL2.GL_LINE_STRIP, 0, dftBinCount);
+			FloatBuffer buffer = Buffers.newDirectFloatBuffer(dfts[dataset][0]);
+			OpenGL.drawLinesXy(gl, GL3.GL_LINE_STRIP, datasets.get(dataset).glColor, buffer, dftBinCount);
 			
 			// also draw points if there are relatively few bins on screen
-			if(width / dftBinCount > 2 * Theme.pointSize)
-				gl.glDrawArrays(GL2.GL_POINTS, 0, dftBinCount);
+			if(width / dftBinCount > 2 * Theme.pointWidth)
+				OpenGL.drawPointsXy(gl, datasets.get(dataset).glColor, buffer, dftBinCount);
 			
 		}
 		
-		gl.glPopMatrix();
+		OpenGL.stopDrawingOffscreen(gl, chartMatrix);
 		
-		// switch back to the screen framebuffer
-		gl.glBindFramebuffer(GL2.GL_FRAMEBUFFER, 0);
-		
-		// restore old viewport/scissor/point settings, projection matrix, and modelview matrix
-		gl.glPopAttrib();
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glPopMatrix();
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glPopMatrix();
-		
-		
-		// draw a textured quad on screen, with the texture replacing the color and opacity of the quad
-		gl.glBlendFunc(GL2.GL_ONE, GL2.GL_ONE_MINUS_SRC_ALPHA);
-		gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_TEXTURE_ENV_MODE, GL2.GL_REPLACE);
-		gl.glDisable(GL2.GL_LIGHTING);
-		gl.glEnable(GL2.GL_TEXTURE_2D);
-		gl.glBindTexture(GL2.GL_TEXTURE_2D, texHandle[0]);
-		gl.glBegin(GL2.GL_QUADS);
-			gl.glTexCoord2f(0, 0);
-			gl.glVertex2f(bottomLeftX, bottomLeftY);
-			
-			gl.glTexCoord2f(0, 1);
-			gl.glVertex2f(bottomLeftX, bottomLeftY + height);
-			
-			gl.glTexCoord2f(1, 1);
-			gl.glVertex2f(bottomLeftX + width, bottomLeftY + height);
-			
-			gl.glTexCoord2f(1, 0);
-			gl.glVertex2f(bottomLeftX + width, bottomLeftY);
-		gl.glEnd();
-		gl.glDisable(GL2.GL_TEXTURE_2D);
-		
-		// restore the normal blend function
-		gl.glBlendFunc(GL2.GL_SRC_ALPHA, GL2.GL_ONE_MINUS_SRC_ALPHA);
+		OpenGL.drawTexturedBox(gl, liveViewTexHandle, true, bottomLeftX, bottomLeftY, width, height, 0, false);
 		
 	}
 	
@@ -432,6 +349,7 @@ public class OpenGLFrequencyDomainCache {
 	 * Multiple DFTs are stacked on top of each other to get a feel for what regions of the spectrum have been occupied.
 	 * The x-axis is frequency, the y-axis is power.
 	 * 
+	 * @param chartMatrix    The current 4x4 matrix.
 	 * @param bottomLeftX    Lower-left coordinate of the region to draw in.
 	 * @param bottomLeftY    Lower-left coordinate of the region to draw in.
 	 * @param width          Width of region to draw in.
@@ -442,10 +360,10 @@ public class OpenGLFrequencyDomainCache {
 	 * @param datasets       The datasets to visualize.
 	 * @param rowCount       How many vertical bins to divide the plot into. (The number of horizontal bins is the DFT bin count.)
 	 */
-	public void renderWaveformView(int bottomLeftX, int bottomLeftY, int width, int height, float minPower, float maxPower, GL2 gl, Dataset[] datasets, int rowCount) {
+	public void renderWaveformView(float[] chartMatrix, int bottomLeftX, int bottomLeftY, int width, int height, float minPower, float maxPower, GL2ES3 gl, List<Dataset> datasets, int rowCount) {
 		
 		// calculate a 2D histogram for each dataset
-		int datasetsCount = datasets.length;
+		int datasetsCount = datasets.size();
 		int xBinCount = dfts[0][0].length;
 		histogram = new int[datasetsCount][xBinCount][rowCount];
 		for(int dataset = 0; dataset < datasetsCount; dataset++) {
@@ -457,111 +375,49 @@ public class OpenGLFrequencyDomainCache {
 				}
 			}
 		}
-		
-		// save the viewport/scissor/point settings, modelview matrix, and projection matrix
-		gl.glPushAttrib(GL2.GL_VIEWPORT_BIT | GL2.GL_SCISSOR_BIT | GL2.GL_POINT_BIT);
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glPushMatrix();
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glPushMatrix();
 
-		// switch to the off-screen framebuffer and corresponding texture
-		gl.glBindFramebuffer(GL2.GL_FRAMEBUFFER, fbHandle[0]);
-		gl.glBindTexture(GL2.GL_TEXTURE_2D, texHandle[0]);
-
-		// replace the existing texture
-		gl.glTexImage2D(GL2.GL_TEXTURE_2D, 0, GL2.GL_RGBA, xBinCount, rowCount, 0, GL2.GL_RGBA, GL2.GL_UNSIGNED_BYTE, null);
-
-		// set the viewport and disable the scissor test
-		gl.glViewport(0, 0, xBinCount, rowCount);
-		gl.glDisable(GL2.GL_SCISSOR_TEST);
-		
-		// set the projection matrix
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glLoadIdentity();
-		gl.glOrtho(0, xBinCount, 0, rowCount, -1, 1);
-		
-		// set the modelview matrix
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glLoadIdentity();
-		
-		// set the blend function
-		gl.glBlendFuncSeparate(GL2.GL_SRC_ALPHA, GL2.GL_ONE_MINUS_SRC_ALPHA, GL2.GL_ONE, GL2.GL_ONE_MINUS_SRC_ALPHA);
-		
-		// draw the 2D histogram onto the texture, one point (pixel) at a time
-		gl.glClearColor(0, 0, 0, 0);
-		gl.glClear(GL2.GL_COLOR_BUFFER_BIT);
-		gl.glPointSize(1);
-		gl.glDisable(GL2.GL_POINT_SMOOTH);
-		
-		int pixelCount = xBinCount * rowCount;
 		float dftCount = lastDft - firstDft + 1;
+		int pixelCount = xBinCount * rowCount;
 		
-		if(waveformPixels == null || waveformPixels.capacity() != pixelCount * 6)
-			waveformPixels = Buffers.newDirectFloatBuffer(pixelCount * 6);
+		ByteBuffer bytes = Buffers.newDirectByteBuffer(pixelCount * 4 * 4); // 4 bytes per: r,g,b,a
+		FloatBuffer pixels = bytes.asFloatBuffer();
 		
+		// populate the pixels, simulating glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
 		for(int dataset = 0; dataset < datasetsCount; dataset++) {
-
-			waveformPixels.position(0);
+			float newR = datasets.get(dataset).glColor[0];
+			float newG = datasets.get(dataset).glColor[1];
+			float newB = datasets.get(dataset).glColor[2];
 			
-			float r = datasets[dataset].color.getRed()   / 255.0f;
-			float g = datasets[dataset].color.getGreen() / 255.0f;
-			float b = datasets[dataset].color.getBlue()  / 255.0f;
-			
-			for(int x = 0; x < xBinCount; x++) {
-				for(int y = 0; y < rowCount; y++) {
-					float a = (float) histogram[dataset][x][y] / dftCount;
-					waveformPixels.put(x + 0.5f); // +0.5 because of the diamond-exit-rule
-					waveformPixels.put(y + 0.5f);
-					waveformPixels.put(r);
-					waveformPixels.put(g);
-					waveformPixels.put(b);
-					waveformPixels.put(a);
+			for(int y = 0; y < rowCount; y++) {
+				for(int x = 0; x < xBinCount; x++) {
+					int index = (x + (y * xBinCount)) * 4; // 4 floats per pixel
+					
+					float r = pixels.get(index + 0);
+					float g = pixels.get(index + 1);
+					float b = pixels.get(index + 2);
+					float a = pixels.get(index + 3);
+					
+					float newA = (float) histogram[dataset][x][y] / dftCount;
+					
+					r = (newR * newA) + (r * (1f - newA));
+					g = (newG * newA) + (g * (1f - newA));
+					b = (newB * newA) + (b * (1f - newA));
+					a = (newA * 1f)   + (a * (1f - newA));
+					
+					pixels.put(index + 0, r);
+					pixels.put(index + 1, g);
+					pixels.put(index + 2, b);
+					pixels.put(index + 3, a);
 				}
 			}
-			
-			gl.glEnableClientState(GL2.GL_COLOR_ARRAY);
-			gl.glVertexPointer(2, GL2.GL_FLOAT, 6, waveformPixels.position(0));
-			gl.glColorPointer(4, GL2.GL_FLOAT, 6, waveformPixels.position(2));
-			gl.glDrawArrays(GL2.GL_POINTS, 0, pixelCount*4);
-			gl.glDisableClientState(GL2.GL_COLOR_ARRAY);
-			
 		}
 		
-		// switch back to the screen framebuffer
-		gl.glBindFramebuffer(GL2.GL_FRAMEBUFFER, 0);
-		
-		// restore old viewport/scissor/point settings, projection matrix, and modelview matrix
-		gl.glPopAttrib();
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glPopMatrix();
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glPopMatrix();
-		
-		// draw a textured quad on screen, with the texture replacing the color and opacity of the quad
-		gl.glBlendFunc(GL2.GL_ONE, GL2.GL_ONE_MINUS_SRC_ALPHA);
-		gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_TEXTURE_ENV_MODE, GL2.GL_REPLACE);
-		gl.glDisable(GL2.GL_LIGHTING);
-		gl.glEnable(GL2.GL_TEXTURE_2D);
-		gl.glBindTexture(GL2.GL_TEXTURE_2D, texHandle[0]);
-		gl.glBegin(GL2.GL_QUADS);
-			float offset = 1.0f / xBinCount / 2.0f; // to start and stop in the *middle* of the first and last bins
-			gl.glTexCoord2f(0 + offset, 0);
-			gl.glVertex2f(bottomLeftX, bottomLeftY);
-			
-			gl.glTexCoord2f(0 + offset, 1);
-			gl.glVertex2f(bottomLeftX, bottomLeftY + height);
-			
-			gl.glTexCoord2f(1 - offset, 1);
-			gl.glVertex2f(bottomLeftX + width, bottomLeftY + height);
-			
-			gl.glTexCoord2f(1 - offset, 0);
-			gl.glVertex2f(bottomLeftX + width, bottomLeftY);
-		gl.glEnd();
-		gl.glDisable(GL2.GL_TEXTURE_2D);
-		
-		// restore the normal blend function
-		gl.glBlendFunc(GL2.GL_SRC_ALPHA, GL2.GL_ONE_MINUS_SRC_ALPHA);
+		if(waveformViewTexHandle == null) {
+			waveformViewTexHandle = new int[1];
+			OpenGL.createTexture(gl, waveformViewTexHandle, xBinCount, rowCount, GL3.GL_RGBA, GL3.GL_FLOAT, false);
+		}
+		OpenGL.writeTexture(gl, waveformViewTexHandle, xBinCount, rowCount, GL3.GL_RGBA, GL3.GL_FLOAT, bytes);
+		OpenGL.drawTexturedBox(gl, waveformViewTexHandle, false, bottomLeftX, bottomLeftY, width, height, 1f/xBinCount/2f, false);
 		
 	}
 	
@@ -571,6 +427,7 @@ public class OpenGLFrequencyDomainCache {
 	 * This allows you to see what regions of the spectrum have been occupied *and* when they were occupied.
 	 * The x-axis is frequency, the y-axis is time.
 	 * 
+	 * @param chartMatrix    The current 4x4 matrix.
 	 * @param bottomLeftX    Lower-left coordinate of the region to draw in.
 	 * @param bottomLeftY    Lower-left coordinate of the region to draw in.
 	 * @param width          Width of region to draw in.
@@ -580,127 +437,56 @@ public class OpenGLFrequencyDomainCache {
 	 * @param gl             The OpenGL context.
 	 * @param datasets       The datasets to visualize.
 	 */
-	public void renderWaterfallView(int bottomLeftX, int bottomLeftY, int width, int height, float minPower, float maxPower, GL2 gl, Dataset[] datasets) {
+	public void renderWaterfallView(float[] chartMatrix, int bottomLeftX, int bottomLeftY, int width, int height, float minPower, float maxPower, GL2ES3 gl, List<Dataset> datasets) {
 		
 		int binCount = dfts[0][0].length;
 		int dftsCount = dfts[0].length;
-		int datasetsCount = datasets.length;
-		
-		// save the viewport/scissor/point settings, modelview matrix, and projection matrix
-		gl.glPushAttrib(GL2.GL_VIEWPORT_BIT | GL2.GL_SCISSOR_BIT | GL2.GL_POINT_BIT);
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glPushMatrix();
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glPushMatrix();
-
-		// switch to the off-screen framebuffer and corresponding texture
-		gl.glBindFramebuffer(GL2.GL_FRAMEBUFFER, fbHandle[0]);
-		gl.glBindTexture(GL2.GL_TEXTURE_2D, texHandle[0]);
-
-		// replace the existing texture
-		gl.glTexImage2D(GL2.GL_TEXTURE_2D, 0, GL2.GL_RGBA, binCount, dftsCount, 0, GL2.GL_RGBA, GL2.GL_UNSIGNED_BYTE, null);
-		
-		// set the viewport and disable the scissor test
-		gl.glViewport(0, 0, binCount, dftsCount);
-		gl.glDisable(GL2.GL_SCISSOR_TEST);
-		
-		// set the projection matrix
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glLoadIdentity();
-		gl.glOrtho(0, binCount, 0, dftsCount, -1, 1);
-		
-		// set the modelview matrix
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glLoadIdentity();
-		
-		// set the blend function
-		gl.glBlendFuncSeparate(GL2.GL_SRC_ALPHA, GL2.GL_ONE_MINUS_SRC_ALPHA, GL2.GL_ONE, GL2.GL_ONE_MINUS_SRC_ALPHA);
-		
-		// draw the waterfall onto the texture, one point (pixel) at a time
-		gl.glClearColor(0, 0, 0, 0);
-		gl.glClear(GL2.GL_COLOR_BUFFER_BIT);
-		gl.glPointSize(1);
-		gl.glDisable(GL2.GL_POINT_SMOOTH);
+		int datasetsCount = datasets.size();
 		
 		int pixelCount = binCount * dftsCount;
 		
-		if(waterfallPixels == null || waterfallPixels.capacity() != pixelCount * 6)
-			waterfallPixels = Buffers.newDirectFloatBuffer(pixelCount * 6);
+		ByteBuffer bytes = Buffers.newDirectByteBuffer(pixelCount * 4 * 4); // 4 bytes per: r,g,b,a
+		FloatBuffer pixels = bytes.asFloatBuffer();
 		
+		// populate the pixels, simulating glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
 		for(int dataset = 0; dataset < datasetsCount; dataset++) {
-
-			waterfallPixels.position(0);
-			
-			float r = datasets[dataset].color.getRed()   / 255.0f;
-			float g = datasets[dataset].color.getGreen() / 255.0f;
-			float b = datasets[dataset].color.getBlue()  / 255.0f;
+			float newR = datasets.get(dataset).glColor[0];
+			float newG = datasets.get(dataset).glColor[1];
+			float newB = datasets.get(dataset).glColor[2];
 			
 			for(int y = 0; y < dftsCount; y++) {
 				int dft = lastDft - y;
 				for(int x = 0; x < binCount; x++) {
-					if(dft < 0) {						
-						waterfallPixels.put(x + 0.5f); // +0.5 because of the diamond-exit-rule
-						waterfallPixels.put(y + 0.5f);
-						waterfallPixels.put(0);
-						waterfallPixels.put(0);
-						waterfallPixels.put(0);
-						waterfallPixels.put(0);
-					} else {
-						float a = (dfts[dataset][dft % dftsCount][x] - minPower) / (maxPower - minPower);
-						if(a < 0) a = 0;
-						if(a > 1) a = 1;
-						waterfallPixels.put(x + 0.5f);
-						waterfallPixels.put(y + 0.5f);
-						waterfallPixels.put(r);
-						waterfallPixels.put(g);
-						waterfallPixels.put(b);
-						waterfallPixels.put(a);
+					if(dft >= 0) {
+						int index = (x + (y * binCount)) * 4; // 4 floats per pixel
+						
+						float r = pixels.get(index + 0);
+						float g = pixels.get(index + 1);
+						float b = pixels.get(index + 2);
+						float a = pixels.get(index + 3);
+						
+						float newA = (dfts[dataset][dft % dftsCount][x] - minPower) / (maxPower - minPower);
+						
+						r = (newR * newA) + (r * (1f - newA));
+						g = (newG * newA) + (g * (1f - newA));
+						b = (newB * newA) + (b * (1f - newA));
+						a = (newA * 1f)   + (a * (1f - newA));
+						
+						pixels.put(index + 0, r);
+						pixels.put(index + 1, g);
+						pixels.put(index + 2, b);
+						pixels.put(index + 3, a);
 					}
 				}
 			}
-			
-			gl.glEnableClientState(GL2.GL_COLOR_ARRAY);
-			gl.glVertexPointer(2, GL2.GL_FLOAT, 6, waterfallPixels.position(0));
-			gl.glColorPointer(4, GL2.GL_FLOAT, 6, waterfallPixels.position(2));
-			gl.glDrawArrays(GL2.GL_POINTS, 0, pixelCount*4);
-			gl.glDisableClientState(GL2.GL_COLOR_ARRAY);
-			
 		}
 		
-		// switch back to the screen framebuffer
-		gl.glBindFramebuffer(GL2.GL_FRAMEBUFFER, 0);
-		
-		// restore old viewport/scissor/point settings, projection matrix, and modelview matrix
-		gl.glPopAttrib();
-		gl.glMatrixMode(GL2.GL_PROJECTION);
-		gl.glPopMatrix();
-		gl.glMatrixMode(GL2.GL_MODELVIEW);
-		gl.glPopMatrix();
-		
-		// draw a textured quad on screen
-		gl.glBlendFunc(GL2.GL_ONE, GL2.GL_ONE_MINUS_SRC_ALPHA);
-		gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_TEXTURE_ENV_MODE, GL2.GL_REPLACE);
-		gl.glDisable(GL2.GL_LIGHTING);
-		gl.glEnable(GL2.GL_TEXTURE_2D);
-		gl.glBindTexture(GL2.GL_TEXTURE_2D, texHandle[0]);
-		gl.glBegin(GL2.GL_QUADS);
-			float offset = 1.0f / binCount / 2.0f; // to start and stop in the *middle* of the first and last bins
-			gl.glTexCoord2f(0 + offset, 0);
-			gl.glVertex2f(bottomLeftX, bottomLeftY);
-			
-			gl.glTexCoord2f(0 + offset, 1);
-			gl.glVertex2f(bottomLeftX, bottomLeftY + height);
-			
-			gl.glTexCoord2f(1 - offset, 1);
-			gl.glVertex2f(bottomLeftX + width, bottomLeftY + height);
-			
-			gl.glTexCoord2f(1 - offset, 0);
-			gl.glVertex2f(bottomLeftX + width, bottomLeftY);
-		gl.glEnd();
-		gl.glDisable(GL2.GL_TEXTURE_2D);
-		
-		// restore the normal blend function
-		gl.glBlendFunc(GL2.GL_SRC_ALPHA, GL2.GL_ONE_MINUS_SRC_ALPHA);
+		if(waterfallViewTexHandle == null) {
+			waterfallViewTexHandle = new int[1];
+			OpenGL.createTexture(gl, waterfallViewTexHandle, binCount, dftsCount, GL3.GL_RGBA, GL3.GL_FLOAT, false);
+		}
+		OpenGL.writeTexture(gl, waterfallViewTexHandle, binCount, dftsCount, GL3.GL_RGBA, GL3.GL_FLOAT, bytes);
+		OpenGL.drawTexturedBox(gl, waterfallViewTexHandle, false, bottomLeftX, bottomLeftY, width, height, 1f/binCount/2f, false);
 		
 	}
 	
@@ -709,10 +495,21 @@ public class OpenGLFrequencyDomainCache {
 	 * 
 	 * @param gl    The OpenGL context.
 	 */
-	public void freeResources(GL2 gl) {
+	public void freeResources(GL2ES3 gl) {
 		
-		gl.glDeleteTextures(1, texHandle, 0);
-		gl.glDeleteFramebuffers(1, fbHandle, 0);
+		if(liveViewTexHandle != null)
+			gl.glDeleteTextures(1, liveViewTexHandle, 0);
+		if(liveViewFbHandle != null)
+			gl.glDeleteFramebuffers(1, liveViewFbHandle, 0);
+		if(waveformViewTexHandle != null)
+			gl.glDeleteTextures(1, waveformViewTexHandle, 0);
+		if(waterfallViewTexHandle != null)
+			gl.glDeleteTextures(1, waterfallViewTexHandle, 0);
+		
+		liveViewTexHandle = null;
+		waveformViewTexHandle = null;
+		waterfallViewTexHandle = null;
+		liveViewFbHandle = null;
 		
 	}
 	
