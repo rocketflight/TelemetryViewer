@@ -275,7 +275,6 @@ public class Dataset {
 	 * @param samples       Samples object to be filled with samples.
 	 */
 	public void getSamples(int startIndex, int endIndex, Samples samples) {
-		
 		if(samples.color == null)
 			samples.color = new float[4];
 		samples.color[0] = (float) color.getRed()   / 255.0f;
