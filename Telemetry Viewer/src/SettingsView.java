@@ -1,24 +1,16 @@
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
-import java.io.PrintStream;
 import java.util.Hashtable;
 
 import javax.swing.Box;
-import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JScrollPane;
 import javax.swing.JSlider;
-import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.text.BadLocationException;
-
 import net.miginfocom.swing.MigLayout;
 
 /**
@@ -41,14 +33,6 @@ public class SettingsView extends JPanel {
 	JCheckBox showFpsCheckbox;
 	JCheckBox showBenchmarksCheckbox;
 	
-	// monitor window to view realtime data
-	static final int MonitorColumnsDefault = 10;
-	static final int MonitorRowsDefault = 20;
-	PrintStream monitorTextStream;
-    JTextArea monitorTextArea;
-	JButton monitorButtonStart;
-	JButton monitorButtonClear;
-	
 	Dimension preferredSize;
 	
 	/**
@@ -57,9 +41,7 @@ public class SettingsView extends JPanel {
 	private SettingsView() {
 		
 		super();
-		setLayout(new MigLayout("wrap 2"
-				+", gap " + Theme.padding 
-				+", insets n n n " + Theme.padding * 2)); // T, L, B, R.
+		setLayout(new MigLayout("wrap 2, gap " + Theme.padding));
 		
 		// tile columns and rows
 		tileColumnsTextfield = new JTextField(Integer.toString(SettingsController.getTileColumns()));
@@ -92,10 +74,11 @@ public class SettingsView extends JPanel {
 			}
 		});
 		
-		add(new JLabel("Tile Columns: "), "left");
-		add(tileColumnsTextfield, "left, grow x");
-		add(new JLabel("Tile Rows: "), "left");
-		add(tileRowsTextfield, "left, grow x");	
+		add(new JLabel("Tile Columns: "));
+		add(tileColumnsTextfield, "grow x");
+		add(new JLabel("Tile Rows: "));
+		add(tileRowsTextfield, "grow x");
+		add(Box.createVerticalStrut(2 * Theme.padding), "span 2");
 		
 		// time format
 		timeFormatCombobox = new JComboBox<String>(SettingsController.getTimeFormats());
@@ -106,27 +89,36 @@ public class SettingsView extends JPanel {
 		timeFormatCombobox.addActionListener(event -> SettingsController.setTimeFormat(timeFormatCombobox.getSelectedItem().toString()));
 		timeFormat24hoursCheckbox = new JCheckBox("Show 24-Hour Time", SettingsController.getTimeFormat24hours());
 		timeFormat24hoursCheckbox.addActionListener(event -> SettingsController.setTimeFormat24hours(timeFormat24hoursCheckbox.isSelected()));
-		add(new JLabel("Time Format: "), "left");
-		add(timeFormatCombobox, "left, grow x");
-		add(timeFormat24hoursCheckbox, "left, span 2");	
+		
+		add(new JLabel("Time Format: "));
+		add(timeFormatCombobox);
+		add(timeFormat24hoursCheckbox, "span 2");
+		add(Box.createVerticalStrut(2 * Theme.padding), "span 2");
 		
 		// tooltips
 		showTooltipsCheckbox = new JCheckBox("Show Plot Tooltips", SettingsController.getTooltipVisibility());
+		showTooltipsCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
 		showTooltipsCheckbox.addActionListener(event -> SettingsController.setTooltipVisibility(showTooltipsCheckbox.isSelected()));
-		add(showTooltipsCheckbox,"left, span 2");
+		
+		add(showTooltipsCheckbox, "span 2");
 		
 		// logitech smooth scrolling
 		enableSmoothScrollingCheckbox = new JCheckBox("Enable Logitech Smooth Scrolling", SettingsController.getSmoothScrolling());
+		enableSmoothScrollingCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
 		enableSmoothScrollingCheckbox.addActionListener(event -> SettingsController.setSmoothScrolling(enableSmoothScrollingCheckbox.isSelected()));
-		add(enableSmoothScrollingCheckbox, "left, span 2");
+		
+		add(enableSmoothScrollingCheckbox, "span 2");
 		
 		// FPS
 		showFpsCheckbox = new JCheckBox("Show FPS and Period", SettingsController.getFpsVisibility());
+		showFpsCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
 		showFpsCheckbox.addActionListener(event -> SettingsController.setFpsVisibility(showFpsCheckbox.isSelected()));
-		add(showFpsCheckbox,"left, span 2");
+		
+		add(showFpsCheckbox, "span 2");
 		
 		// CPU and GPU times
 		showBenchmarksCheckbox = new JCheckBox("Show Chart Benchmarks", SettingsController.getBenchmarkedChart() != null);		
+		showBenchmarksCheckbox.setAlignmentX(Component.LEFT_ALIGNMENT);
 		showBenchmarksCheckbox.addActionListener(event -> {
 			if(ChartsController.getCharts().isEmpty()) {
 				NotificationsController.showFailureForSeconds("There are no charts to benchmark. Add a chart first.", 5, true);
@@ -139,8 +131,8 @@ public class SettingsView extends JPanel {
 				NotificationsController.showHintUntil("Click on a chart to benchmark.", () -> !SettingsController.awaitingBenchmarkedChart(), true);
 			}
 		});
-		add(showBenchmarksCheckbox,"left, span 2");
-		add(new JLabel(" "),"span 2");
+		
+		add(showBenchmarksCheckbox, "span 2");
 		
 		// antialiasing
 		antialiasingLevelSlider = new JSlider(0, 5, (int) (Math.log(SettingsController.getAntialiasingLevel()) / Math.log(2)));
@@ -157,51 +149,8 @@ public class SettingsView extends JPanel {
 		antialiasingLevelSlider.setPaintLabels(true);
 		antialiasingLevelSlider.addChangeListener(event -> SettingsController.setAntialiasingLevel((int) Math.pow(2, antialiasingLevelSlider.getValue())));
 		
-		add(new JLabel("Antialiasing: "), "left, span 2");
-		add(antialiasingLevelSlider, "span 2");
-		add(new JLabel(" "),"span 2");
-
-		// monitor window to view real time data
-	    monitorTextArea = new JTextArea(MonitorRowsDefault, MonitorColumnsDefault);
-	    monitorTextArea.setEditable(false);
-	    monitorTextArea.setFont(Theme.monitorFont);
-	    monitorButtonStart = new JButton("Start");
-	    monitorButtonClear = new JButton("Clear");
-
-        // adds event handler for button Start
-	    monitorButtonStart.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent evt) {
-            	if(monitorButtonStart.getText() == "Start") {
-                    // create the output stream and assign it to the packet processor (only works for CSV)
-            		monitorTextStream = new PrintStream(new MonitorStream(monitorTextArea));
-                    Packet.setMonitorStream(monitorTextStream);
-                    monitorButtonStart.setText("Stop");
-            	}
-            	else {
-                    Packet.setMonitorStream(null);
-                    monitorButtonStart.setText("Start");
-            	}
-            }
-        });
-         
-        // adds event handler for button Clear
-	    monitorButtonClear.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent evt) {
-                // clears the text area
-                try {
-                	monitorTextArea.getDocument().remove(0, monitorTextArea.getDocument().getLength());
-                } catch (BadLocationException ex) {
-                    ex.printStackTrace();
-                }
-            }
-        });
-	    
-		add(new JLabel("Monitor:"), "span 2");
-		add(monitorButtonStart, "span 1, left");
-        add(monitorButtonClear, "span 1, right");
-        add(new JScrollPane(monitorTextArea), "span 2, grow");
+		add(new JLabel("Antialiasing: "));
+		add(antialiasingLevelSlider, "width 100%");
 		
 		// save the preferred size so this panel can be resized to hide or show
 		preferredSize = getPreferredSize();
