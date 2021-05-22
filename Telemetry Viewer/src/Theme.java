@@ -54,9 +54,11 @@ public class Theme {
 	public static float   legendNamesPadding    = 25.0f;
 	
 	// fonts
+	public static Color fontColor = Color.BLACK;
 	public static Font smallFont  = new Font("Geneva", Font.PLAIN, 12);
 	public static Font mediumFont = new Font("Geneva", Font.BOLD,  14);
 	public static Font largeFont  = new Font("Geneva", Font.BOLD,  18);
+	public static Font monitorFont  = new Font("Monospaced", Font.PLAIN, 10);
 	
 	/**
 	 * This method must be called when the OpenGL context is initialized,

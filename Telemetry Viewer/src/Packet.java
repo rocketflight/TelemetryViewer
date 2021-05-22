@@ -1,5 +1,6 @@
 import java.awt.Color;
 import java.io.InputStream;
+import java.io.OutputStream;
 
 import javax.swing.JPanel;
 
@@ -87,5 +88,23 @@ public abstract class Packet {
 	public abstract JPanel getDataStructureGui();
 	public abstract void startReceivingData(InputStream stream);
 	public abstract void stopReceivingData();
+	
+	protected static OutputStream monitorStream = null;
+	
+	/**
+	 * Set an output stream used to monitor packets in real time
+	 */
+	public static final void setMonitorStream(OutputStream stream)
+	{
+		monitorStream = stream;
+	}
+	
+	/**
+	 * Clear the output stream used to monitor packets in real time
+	 */
+	public static final void clearMonitorStream()
+	{
+		monitorStream = null;
+	}
 
 }

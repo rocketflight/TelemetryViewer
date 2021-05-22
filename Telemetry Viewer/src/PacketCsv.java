@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.SocketTimeoutException;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.Box;
@@ -302,6 +303,12 @@ public class PacketCsv extends Packet {
 					for(Dataset dataset : DatasetsController.getAllDatasets())
 						dataset.add(Float.parseFloat(tokens[dataset.location]));
 					DatasetsController.incrementSampleCount();
+					
+					// output to a monitor stream
+					if( Packet.monitorStream != null ) {
+						Packet.monitorStream.write(line.getBytes(Charset.forName("UTF-8")));
+						Packet.monitorStream.write(System.getProperty("line.separator").getBytes(Charset.forName("UTF-8")));
+					}
 					
 				} catch(NumberFormatException | NullPointerException | ArrayIndexOutOfBoundsException | SocketTimeoutException e1) {
 					
